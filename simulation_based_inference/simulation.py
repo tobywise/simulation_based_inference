@@ -4,6 +4,9 @@ from typing import Tuple, List
 import jax
 
 
+
+
+
 def generate_bandit_outcomes(
     n_trials: int,
     n_bandits: int,
@@ -79,9 +82,11 @@ def generate_bandit_outcomes(
 
     return outcomes, trial_outcome_probability_levels
 
+
 # TODO wrap the RW function so that choices and outcomes are passed in as a single tuple
 
-# @jax.jit
+
+@jax.jit
 def rescorla_wagner_update(
     value_estimate: np.ndarray,
     choices: np.ndarray,
@@ -107,14 +112,13 @@ def rescorla_wagner_update(
     # Calculate prediction error
     prediction_error = (outcomes - value_estimate) * choices
 
-    # Get chosen bandit
-    choice = choices.argmax()
-
     # Update value estimates according to the relevant learning rate
-    if prediction_error[choice] > 0:
-        value_estimate = value_estimate + alpha_p * prediction_error
-    else:
-        value_estimate = value_estimate + alpha_n * prediction_error
+    value_estimate = (
+        value_estimate + alpha_p * prediction_error * (prediction_error > 0) * choices
+    )
+    value_estimate = (
+        value_estimate + alpha_n * prediction_error * (prediction_error < 0) * choices
+    )
 
     return value_estimate
 
@@ -156,7 +160,9 @@ def simulate_RL(
     n_observations = len(alpha_p)
 
     # Preallocate array for storing the value estimates
-    value_estimates = np.ones((n_trials, n_observations, n_bandits)) * starting_value_estimate
+    value_estimates = (
+        np.ones((n_observations, n_trials, n_bandits)) * starting_value_estimate
+    )
 
     # Preallocate array for choices
     choices = np.zeros((n_observations, n_trials, n_bandits))
@@ -174,21 +180,21 @@ def simulate_RL(
     for obs in range(n_observations):
 
         # Action selector - softmax
-        softmax = SoftmaxActionSelector(1 / temperature[obs], seed=seed)
+        softmax = SoftmaxActionSelector(temperature[obs], seed=seed)
 
         for trial in range(n_trials):
 
             # Select one of the bandits according to the choice probabilities
-            choice = softmax.get_pi(value_estimates[trial, obs, :][None, :]).squeeze()
+            choice = softmax.get_pi(value_estimates[obs, trial, :][None, :]).squeeze()
 
             # Add choice to choices array
             choices[obs, trial, choice] = 1
 
             # Update value estimate
             if trial < n_trials - 1:
-                value_estimates[trial + 1, obs, :] = rescorla_wagner_update(
-                    value_estimates[trial, obs, :],
-                    choices[obs, trial, choice],
+                value_estimates[obs, trial + 1, :] = rescorla_wagner_update(
+                    value_estimates[obs, trial, :],
+                    choices[obs, trial, :],
                     outcomes[trial, :],
                     alpha_p[obs],
                     alpha_n[obs],

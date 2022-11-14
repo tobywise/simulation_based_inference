@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 from simulation_based_inference.simulation import *
 
 # Need long blocks to get decent probability estimates
@@ -128,9 +129,9 @@ def test_rescorla_wagner_update_learning_rates(alpha_p, alpha_n):
         v_new = rescorla_wagner_update(np.expand_dims(v, 0), np.expand_dims(1, 0), np.expand_dims(outcomes[trial], 0), alpha_p, alpha_n)
 
         if outcomes[trial] > v:
-            assert v_new == v + alpha_p * (outcomes[trial] - v)
+            assert np.isclose(v_new, v + alpha_p * (outcomes[trial] - v))
         else:
-            assert v_new == v - alpha_n * (v - outcomes[trial])
+            assert np.isclose(v_new, v - alpha_n * (v - outcomes[trial]))
         
         v = v_new
 
