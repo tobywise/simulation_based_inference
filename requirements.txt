@@ -50,7 +50,6 @@ Keras-Preprocessing==1.1.2
 kiwisolver==1.4.4
 libclang==14.0.6
 llvmlite==0.39.1
-maMDP==0.1
 Markdown==3.3.4
 matplotlib==3.6.2
 matplotlib-inline==0.1.6

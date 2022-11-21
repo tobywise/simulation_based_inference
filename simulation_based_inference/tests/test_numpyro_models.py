@@ -2,8 +2,7 @@ import pytest
 from simulation_based_inference.simulation import simulate_RL
 from simulation_based_inference.numpyro_models import (
     rescorla_wagner_trial_iterator,
-    rescorla_wagner_model_vmap,
-    softmax
+    rescorla_wagner_model_vmap
 )
 import numpy as np
 
