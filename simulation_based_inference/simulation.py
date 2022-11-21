@@ -3,7 +3,7 @@ from functools import partial
 from typing import Tuple, List, Union
 import jax
 import jax.numpy as jnp
-from .utils import one_hot_encode_choices
+
 
 @jax.jit
 def softmax(value: np.ndarray, temperature: float = 1) -> np.ndarray:
