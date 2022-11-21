@@ -101,7 +101,6 @@ scipy==1.9.1
 seaborn==0.12.1
 setuptools==63.4.1
 six==1.16.0
-src==0.0.0
 stack-data==0.6.0
 tensorboard==2.10.1
 tensorboard-data-server==0.6.0
