@@ -3,7 +3,7 @@ from functools import partial
 from typing import Tuple, List, Union
 import jax
 import jax.numpy as jnp
-
+from .utils import one_hot_encode_choices
 
 @jax.jit
 def softmax(value: np.ndarray, temperature: float = 1) -> np.ndarray:
@@ -88,7 +88,7 @@ def rescorla_wagner_update_choice_wrapper(
         value_estimate, choice_array, outcomes, alpha_p, alpha_n
     )
 
-    return updated_value, (value_estimate, choice_p, choice)
+    return updated_value, (value_estimate, choice_p, choice, choice_array)
 
 
 rescorla_wagner_update_choice_wrapper_jit = jax.jit(
@@ -139,20 +139,27 @@ def rescorla_wagner_trial_choice_iterator(
     keys = jax.random.split(key, n_trials)
 
     # use jax.lax.scan to iterate over trials
-    _, (v, choice_p, choices) = jax.lax.scan(
+    _, (v, choice_p, choices, choices_one_hot) = jax.lax.scan(
         rescorla_wagner_update_partial, v_start, (outcomes, keys)
     )
 
-    return v, choice_p, choices
+    return v, choice_p, choices, choices_one_hot
 
 
+# Set up jax JIT and vmaps
 rescorla_wagner_trial_choice_iterator_jit = jax.jit(
     rescorla_wagner_trial_choice_iterator, static_argnums=(2, 3)
 )
 
-# Vmap to allow iterating over multiple parameter values
-rescorla_wagner_simulate_vmap = jax.vmap(
+# Vmap to iterate over blocks
+rescorla_wagner_simulate_vmap_blocks = jax.vmap(
     rescorla_wagner_trial_choice_iterator_jit,
+    in_axes=(None, 0, None, None, None, None, None, None),
+)
+
+# Vmap to iterate over observations (subjects)
+rescorla_wagner_simulate_vmap_observations = jax.vmap(
+    rescorla_wagner_simulate_vmap_blocks,
     in_axes=(None, None, None, None, None, 0, 0, 0),
 )
 
@@ -232,6 +239,59 @@ def generate_bandit_outcomes(
 
     return outcomes, trial_outcome_probability_levels
 
+def generate_block_bandit_outcomes(
+    n_trials_per_block: int,
+    n_blocks: int,
+    n_bandits: int,
+    outcome_probability_levels: List[int] = [0.2, 0.5, 0.8],
+    outcome_probability_duration: Tuple[int, int] = (20, 40),
+    seed: int = 42,
+):
+    """
+    Generate outcomes for a multi-armed bandit task with n_bandits arms over a number of blocks.
+
+    Args:
+        n_trials_per_block (int): Number of trials per block
+        n_blocks (int): Number of blocks
+        n_bandits (int): Number of bandits
+        outcome_probability_levels (List[int], optional): Outcome probability levels to alternate between. Defaults to [0.2, 0.5, 0.8].
+        outcome_probability_duration (Tuple[int, int], optional): Minimum and maximum number of trials to use each outcome probability level.
+        Defaults to (20, 40).
+        seed (int, optional): Random seed. Defaults to 42.
+
+    Returns:
+        np.ndarray: Array of outcomes for each trial and each bandit, of shape (n_blocks, n_trials, n_bandits)
+    """
+
+    block_outcomes = []
+    block_trial_probability_levels = []
+
+    # Generate seeds for each block
+    rng = np.random.RandomState(seed)
+    block_seeds = rng.randint(0, 100000, n_blocks)
+
+    # Generate outcomes for each block
+    for i in range(n_blocks):
+
+        outcomes, trial_probability_levels = generate_bandit_outcomes(
+            n_trials=n_trials_per_block,
+            n_bandits=n_bandits,
+            outcome_probability_levels=outcome_probability_levels,
+            outcome_probability_duration=outcome_probability_duration,
+            seed=block_seeds[i],
+        )
+
+        # Add to the list of outcomes
+        block_outcomes.append(outcomes)
+        block_trial_probability_levels.append(trial_probability_levels)
+
+    # Stack outcomes and trial probability levels
+    outcomes = np.stack(block_outcomes)
+    trial_probability_levels = np.stack(block_trial_probability_levels)
+
+    return outcomes, trial_probability_levels
+
+
 
 @jax.jit
 def rescorla_wagner_update(
@@ -269,16 +329,12 @@ def rescorla_wagner_update(
 
     return value_estimate
 
-
 def simulate_rescorla_wagner_dual(
     alpha_p: np.ndarray,
     alpha_n: np.ndarray,
     temperature: np.ndarray,
-    outcomes: Union[None, np.ndarray] = None,
-    n_trials: int = 300,
-    n_bandits: int = 4,
-    outcome_probability_levels: List[int] = [0.2, 0.5, 0.8],
-    outcome_probability_duration: Tuple[int, int] = (20, 40),
+    outcomes: np.ndarray,
+    choice_format: str = "one_hot",
     starting_value_estimate: float = 0.5,
     seed: int = 42,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -289,37 +345,25 @@ def simulate_rescorla_wagner_dual(
         alpha_p (np.ndarray): Learning rate for prediction errors > 0. Should have as many entries as desired observations (subjects).
         alpha_n (np.ndarray): Learning rate for prediction errors <= 0. Should have as many entries as desired observations (subjects).
         temperature (np.ndarray): Temperatures. Should have as many entries as desired observations (subjects).
-        outcomes (Union[None, np.ndarray], optional): Outcomes for each trial and each bandit. If None, will be generated. Defaults to None.
-        n_trials (int): Number of trials to simulate. Defaults to 300.
-        n_bandits (int, optional): Number of bandits. Defaults to 4.
-        outcome_probability_levels (List[int], optional): Outcome probability levels to alternate between. Defaults to [0.2, 0.5, 0.8].
-        outcome_probability_duration (Tuple[int, int], optional): Minimum and maximum number of trials to use each outcome probability
-        level. Defaults to (20, 40).
+        outcomes (np.ndarray): Outcomes for each block, trial and each bandit. An array of shape (n_blocks, n_trials, n_bandits).
+        choice_format (str, optional): Format of the choices. Can be either 'one_hot' or 'index'. Defaults to "one_hot".
         starting_value_estimate (float, optional): Starting value estimate for each bandit. Defaults to 0.5.
         seed (int, optional): Random seed. Defaults to 42.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]: Outcomes, trial outcome probability levels, choice_probabiliies,
-        choices, value estimates.
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: Choice probabilities, choices, value estimates.
     """
 
     assert (
         alpha_p.shape == alpha_n.shape == temperature.shape
     ), "alpha_p, alpha_n and temperature must have the same shape"
 
-    if outcomes is None:
-        # Generate outcomes
-        outcomes, trial_outcome_probability_levels = generate_bandit_outcomes(
-            n_trials,
-            n_bandits,
-            outcome_probability_levels,
-            outcome_probability_duration,
-            seed,
-        )
+    # Extract dimensions
+    n_blocks, n_trials, n_bandits = outcomes.shape
 
     # Run simulation
-    key = jax.random.PRNGKey(42)
-    value_estimates, choice_p, choices = rescorla_wagner_simulate_vmap(
+    key = jax.random.PRNGKey(seed)
+    value_estimates, choice_p, choices, choices_one_hot = rescorla_wagner_simulate_vmap_observations(
         key,
         outcomes,
         n_bandits,
@@ -330,17 +374,17 @@ def simulate_rescorla_wagner_dual(
         temperature,
     )
 
-    return outcomes, trial_outcome_probability_levels, choice_p, choices, value_estimates
+    if choice_format == "one_hot":
+        return choice_p, choices_one_hot, value_estimates
+    elif choice_format == "index":
+        return choice_p, choices, value_estimates
 
 
 def simulate_rescorla_wagner_single(
     alpha: np.ndarray,
     temperature: np.ndarray,
     outcomes: Union[None, np.ndarray] = None,
-    n_trials: int = 300,
-    n_bandits: int = 4,
-    outcome_probability_levels: List[int] = [0.2, 0.5, 0.8],
-    outcome_probability_duration: Tuple[int, int] = (20, 40),
+    choice_format: str = "one_hot",
     starting_value_estimate: float = 0.5,
     seed: int = 42,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -351,16 +395,12 @@ def simulate_rescorla_wagner_single(
         alpha_p (np.ndarray): Learning rate. Should have as many entries as desired observations (subjects).
         temperature (np.ndarray): Temperatures. Should have as many entries as desired observations (subjects).
         outcomes (Union[None, np.ndarray], optional): Outcomes for each trial and each bandit. If None, will be generated. Defaults to None.
-        n_trials (int): Number of trials to simulate. Defaults to 300.
-        n_bandits (int, optional): Number of bandits. Defaults to 4.
-        outcome_probability_levels (List[int], optional): Outcome probability levels to alternate between. Defaults to [0.2, 0.5, 0.8].
-        outcome_probability_duration (Tuple[int, int], optional): Minimum and maximum number of trials to use each outcome probability
-        level. Defaults to (20, 40).
+        choice_format (str, optional): Format of the choices. Can be either 'one_hot' or 'index'. Defaults to "one_hot".
         starting_value_estimate (float, optional): Starting value estimate for each bandit. Defaults to 0.5.
         seed (int, optional): Random seed. Defaults to 42.
 
     Returns:
-        np.ndarray: _description_
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: Choice probabilities, choices, value estimates.
     """
 
     return simulate_rescorla_wagner_dual(
@@ -368,10 +408,7 @@ def simulate_rescorla_wagner_single(
         alpha,
         temperature,
         outcomes,
-        n_trials,
-        n_bandits,
-        outcome_probability_levels,
-        outcome_probability_duration,
+        choice_format,
         starting_value_estimate,
         seed
     )

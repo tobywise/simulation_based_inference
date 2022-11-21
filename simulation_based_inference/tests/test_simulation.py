@@ -111,6 +111,18 @@ def test_generate_bandit_outcomes_block_lengths(n_trials, n_bandits, outcome_pro
             )  # Prob before and after block changes should be different
 
 
+def test_generate_bandit_outcomes_block_shapes_values():
+
+    outcomes, _ = generate_block_bandit_outcomes(100, 3, 4)
+
+    assert outcomes.shape == (3, 100, 4)
+
+    assert np.all(np.isin(outcomes, [0, 1]))
+    assert (outcomes[0, ...] != outcomes[1, ...]).any()
+    assert (outcomes[0, ...] != outcomes[2, ...]).any()
+    assert (outcomes[2, ...] != outcomes[1, ...]).any()
+
+
 rw_parameters = [
     (0.5, 0.5),
     (0.2, 0.8),
@@ -267,8 +279,12 @@ def test_learning_rates():
     alpha_n_2 = rng.uniform(0.5, 1, n_obs)
     temperature_2 = rng.uniform(0, 1, n_obs)
 
-    _, _, _, _, value_estimates_1 = simulate_rescorla_wagner_dual(alpha_p_1, alpha_n_1, temperature_1)
-    _, _, _, _, value_estimates_2 = simulate_rescorla_wagner_dual(alpha_p_2, alpha_n_2, temperature_2)
+    outcomes, _ = generate_block_bandit_outcomes(
+        100, 3, 4
+    )
+
+    _, _, value_estimates_1 = simulate_rescorla_wagner_dual(alpha_p_1, alpha_n_1, temperature_1, outcomes)
+    _, _, value_estimates_2 = simulate_rescorla_wagner_dual(alpha_p_2, alpha_n_2, temperature_2, outcomes)
 
     assert value_estimates_1.mean() > value_estimates_2.mean()
 
@@ -283,7 +299,11 @@ def test_choices_not_the_same():
     alpha_n = rng.uniform(0, 0, n_obs)
     temperature = rng.uniform(0, 1, n_obs)
 
-    _, _, _, choices, _ = simulate_rescorla_wagner_dual(alpha_p, alpha_n, temperature)
+    outcomes, _ = generate_block_bandit_outcomes(
+        100, 3, 4
+    )
+
+    _, choices, _ = simulate_rescorla_wagner_dual(alpha_p, alpha_n, temperature, outcomes, choice_format='index')
 
     # check that all values are represented in choices
     assert len(np.unique(choices)) == 4

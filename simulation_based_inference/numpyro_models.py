@@ -105,10 +105,23 @@ def rescorla_wagner_trial_iterator(
     return v
 
 
-# vmap iterator over subjects
-rescorla_wagner_model_vmap = jax.vmap(
-    rescorla_wagner_trial_iterator, in_axes=(None, 0, None, 0, 0)
+# Vmap to iterate over blocks
+rescorla_wagner_model_vmap_blocks = jax.vmap(
+    rescorla_wagner_trial_iterator,
+    in_axes=(0, 0, None, None, None),
 )
+
+# Vmap to iterate over observations (subjects)
+rescorla_wagner_model_vmap_observations = jax.vmap(
+    rescorla_wagner_model_vmap_blocks,
+    in_axes=(None, 0, None, 0, 0),
+)
+
+
+# # vmap iterator over subjects
+# rescorla_wagner_model_vmap = jax.vmap(
+#     rescorla_wagner_trial_iterator, in_axes=(None, 0, None, 0, 0)
+# )
 
 
 def rescorla_wagner_model(
@@ -126,7 +139,7 @@ def rescorla_wagner_model(
     """
 
     # Get shapes
-    n_obs, _, _ = choices.shape
+    n_obs, _, _, _ = choices.shape
 
     # Prior on learning rates
     alpha_p_group_mean, alpha_p_group_sd, alpha_p_offset = create_subject_params(
@@ -162,7 +175,7 @@ def rescorla_wagner_model(
     # Update the values
     v = numpyro.deterministic(
         "value",
-        rescorla_wagner_model_vmap(
+        rescorla_wagner_model_vmap_observations(
             outcomes,
             choices,
             starting_value_estimate,
@@ -172,7 +185,8 @@ def rescorla_wagner_model(
     )
 
     # Get action probabilities
-    p = numpyro.deterministic("p", softmax_vmap(v, temperature_subject_transformed))
+    # p = numpyro.deterministic("p", softmax_vmap(v, temperature_subject_transformed))
+    p = softmax_vmap(v, temperature_subject_transformed)
 
     # Bernoulli likelihood
     numpyro.sample(
@@ -183,7 +197,7 @@ def rescorla_wagner_model(
 
     return v
 
-
+# TODO add in blocks
 def run_rescorla_wagner_inference(
     outcomes: np.ndarray,
     choices: np.ndarray,
