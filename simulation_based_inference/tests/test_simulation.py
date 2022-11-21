@@ -267,8 +267,8 @@ def test_learning_rates():
     alpha_n_2 = rng.uniform(0.5, 1, n_obs)
     temperature_2 = rng.uniform(0, 1, n_obs)
 
-    _, _, _, value_estimates_1 = simulate_RL(alpha_p_1, alpha_n_1, temperature_1)
-    _, _, _, value_estimates_2 = simulate_RL(alpha_p_2, alpha_n_2, temperature_2)
+    _, _, _, _, value_estimates_1 = simulate_rescorla_wagner_dual(alpha_p_1, alpha_n_1, temperature_1)
+    _, _, _, _, value_estimates_2 = simulate_rescorla_wagner_dual(alpha_p_2, alpha_n_2, temperature_2)
 
     assert value_estimates_1.mean() > value_estimates_2.mean()
 
@@ -283,7 +283,7 @@ def test_choices_not_the_same():
     alpha_n = rng.uniform(0, 0, n_obs)
     temperature = rng.uniform(0, 1, n_obs)
 
-    _, _, choices, _ = simulate_RL(alpha_p, alpha_n, temperature)
+    _, _, _, choices, _ = simulate_rescorla_wagner_dual(alpha_p, alpha_n, temperature)
 
     # check that all values are represented in choices
     assert len(np.unique(choices)) == 4

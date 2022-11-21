@@ -88,7 +88,7 @@ def rescorla_wagner_update_choice_wrapper(
         value_estimate, choice_array, outcomes, alpha_p, alpha_n
     )
 
-    return updated_value, (value_estimate, choice)
+    return updated_value, (value_estimate, choice_p, choice)
 
 
 rescorla_wagner_update_choice_wrapper_jit = jax.jit(
@@ -139,11 +139,11 @@ def rescorla_wagner_trial_choice_iterator(
     keys = jax.random.split(key, n_trials)
 
     # use jax.lax.scan to iterate over trials
-    _, (v, choices) = jax.lax.scan(
+    _, (v, choice_p, choices) = jax.lax.scan(
         rescorla_wagner_update_partial, v_start, (outcomes, keys)
     )
 
-    return v, choices
+    return v, choice_p, choices
 
 
 rescorla_wagner_trial_choice_iterator_jit = jax.jit(
@@ -281,7 +281,7 @@ def simulate_rescorla_wagner_dual(
     outcome_probability_duration: Tuple[int, int] = (20, 40),
     starting_value_estimate: float = 0.5,
     seed: int = 42,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Simulate choices a multi-armed bandit task with n_bandits arms.
 
@@ -299,7 +299,8 @@ def simulate_rescorla_wagner_dual(
         seed (int, optional): Random seed. Defaults to 42.
 
     Returns:
-        np.ndarray: _description_
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]: Outcomes, trial outcome probability levels, choice_probabiliies,
+        choices, value estimates.
     """
 
     assert (
@@ -318,7 +319,7 @@ def simulate_rescorla_wagner_dual(
 
     # Run simulation
     key = jax.random.PRNGKey(42)
-    value_estimates, choices = rescorla_wagner_simulate_vmap(
+    value_estimates, choice_p, choices = rescorla_wagner_simulate_vmap(
         key,
         outcomes,
         n_bandits,
@@ -329,7 +330,7 @@ def simulate_rescorla_wagner_dual(
         temperature,
     )
 
-    return outcomes, trial_outcome_probability_levels, choices, value_estimates
+    return outcomes, trial_outcome_probability_levels, choice_p, choices, value_estimates
 
 
 def simulate_rescorla_wagner_single(
