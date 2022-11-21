@@ -151,3 +151,139 @@ def test_rescorla_wagner_only_chosen_updated():
 
         assert v_new[1 - choice] == v[1 - choice]
         assert v_new[choice] != v[choice]
+
+
+@pytest.fixture
+def q_values_fixture():
+    q_vals = np.zeros((7, 4))  # 5 states, 4 actions
+    q_vals[0, :] = np.array([4.5, 3.5, 2.5, 1.5])
+    q_vals[1, :] = np.array([0, 0, 0, 0])
+    q_vals[2, :] = np.array([1, 1, 0, 0])
+    q_vals[3, :] = np.array([200, 50, 2, 1])
+    q_vals[4, :] = np.array([-20, 0, 20, 1])
+    q_vals[5, :] = np.array([10003434, 0, 100000, -100])
+    q_vals[6, :] = np.array([-100000, 0, -5000, -500000000000])
+    return q_vals
+
+@pytest.fixture()
+def q_values_increasing():
+    q_values = np.zeros((2, 5))
+    q_values[0, :] = np.arange(0, 5)
+    q_values[1, :] = np.arange(4, -1, -1)
+
+    return q_values
+
+@pytest.fixture()
+def q_values_equal():
+    q_values = np.ones((2, 5))
+    return q_values
+
+
+def test_softmax_action_selector_action_p(q_values_fixture):
+
+    action_p = softmax(q_values_fixture, temperature=1)
+
+    assert np.all(np.isclose(action_p.sum(axis=1), 1))
+    assert np.all(np.diff(action_p[0, :]) < 0)
+    assert np.all(action_p[1, :] == action_p[1, 0])
+    assert np.all(action_p >= 0)
+    assert np.all(action_p <= 1)
+
+def test_softmax_action_selector_temperature_action_p(q_values_increasing):
+
+    temp_action_p = np.zeros((3, 2, 5))
+
+    for n, temp in enumerate([0.5, 1, 5]):
+        action_p = softmax(q_values_increasing, temperature=temp)
+
+        assert np.all(np.diff(action_p[0, :]) > 0)
+        assert np.all(np.diff(action_p[1, :]) < 0)
+        assert np.all(np.isclose(action_p[0, ::-1], action_p[1]))
+
+        temp_action_p[n, ...] = action_p
+
+    assert np.all(np.diff(temp_action_p[:, 0, 1]) > 0)
+    assert np.all(np.diff(temp_action_p[:, 1, 1]) > 0)
+
+
+def test_softmax_random_values():
+
+    # Try a load of random values to make sure it doesn't break
+
+    for _ in range(10000):
+            
+        q_values = np.random.randn(10, 10)
+        temperature = np.random.rand() * 10
+
+        action_p = softmax(q_values, temperature=temperature)
+
+        assert np.all(np.isclose(action_p.sum(axis=1), 1))
+        assert np.all(action_p >= 0)
+        assert np.all(action_p <= 1)
+        assert ~np.isnan(action_p).any()
+
+
+action_probs = [
+    np.array([0.25, 0.25, 0.25, 0.25]),
+    np.array([0.1, 0.1, 0.1, 0.7]),
+    np.array([1., 0., 0., 0.]),
+    np.array([0., 0., 0., 1.]),
+    np.array([0.5, 0.5, 0., 0., 0., 0.]),
+    np.array([0.1, 0.9, 0., 0., 0., 0.]),
+]
+
+@pytest.mark.parametrize("action_p", action_probs)
+def test_choice_from_action_p(action_p):
+
+    actions = []
+
+    key = jax.random.PRNGKey(42)
+
+    keys = jax.random.split(key, 10000)
+
+    for i in range(10000):
+        actions.append(choice_from_action_p_jax(keys[i], action_p, len(action_p)))
+
+    observed_action_prob = np.zeros(len(action_p))
+
+    for i in range(len(action_p)):
+        observed_action_prob[i] = np.sum(np.array(actions) == i) / len(actions)
+
+    assert observed_action_prob == pytest.approx(action_p, abs=0.01)
+
+def test_learning_rates():
+
+    rng = np.random.RandomState(42)
+
+    n_obs = 100
+
+    # Positive bias
+    alpha_p_1 = rng.uniform(0.5, 1, n_obs)
+    alpha_n_1 = rng.uniform(0, 0.5, n_obs)
+    temperature_1 = rng.uniform(0, 1, n_obs)
+
+    # Negative bias
+    alpha_p_2 = rng.uniform(0, 0.5, n_obs)
+    alpha_n_2 = rng.uniform(0.5, 1, n_obs)
+    temperature_2 = rng.uniform(0, 1, n_obs)
+
+    _, _, _, value_estimates_1 = simulate_RL(alpha_p_1, alpha_n_1, temperature_1)
+    _, _, _, value_estimates_2 = simulate_RL(alpha_p_2, alpha_n_2, temperature_2)
+
+    assert value_estimates_1.mean() > value_estimates_2.mean()
+
+def test_choices_not_the_same():
+
+    rng = np.random.RandomState(42)
+
+    n_obs = 100
+
+    # Positive bias
+    alpha_p = rng.uniform(0, 1, n_obs)
+    alpha_n = rng.uniform(0, 0, n_obs)
+    temperature = rng.uniform(0, 1, n_obs)
+
+    _, _, choices, _ = simulate_RL(alpha_p, alpha_n, temperature)
+
+    # check that all values are represented in choices
+    assert len(np.unique(choices)) == 4

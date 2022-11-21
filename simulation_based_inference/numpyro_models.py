@@ -1,32 +1,17 @@
-import numpyro
-import numpy as np
-import jax.numpy as jnp
+import os
 import jax
-from jax import random
+import numpyro
+# set devices
+# if jax.default_backend() == 'gpu':
+#     numpyro.set_platform('gpu') 
+# else:
+#     numpyro.set_host_device_count(len(os.sched_getaffinity(0)))
+import numpy as np
 import numpyro.distributions as dist
 from typing import Union, Tuple
-from simulation_based_inference.simulation import rescorla_wagner_update
+from simulation_based_inference.simulation import rescorla_wagner_update, softmax
 from functools import partial
 from numpyro.infer import MCMC, NUTS
-
-@jax.jit
-def softmax(value: np.ndarray, temperature: float = 1) -> np.ndarray:
-    """
-    Softmax function, with optional temperature parameter.
-
-    Args:
-        value (np.ndarray): Array of values to apply softmax to, of shape (n_trials, n_bandits)
-        temperature (float, optional): Softmax temperature, in range 0 > inf. Defaults to 1.
-
-    Returns:
-        np.ndarray: Choice probabilities, of shape (n_trials, n_bandits)
-    """
-    # Subtract max value to avoid overflow
-    return (jnp.exp((value) / temperature)) / (
-        jnp.sum(jnp.exp((value) / temperature), axis=1)[
-            :, None
-        ]
-    )
 
 # vmap softmax over observations
 softmax_vmap = jax.vmap(softmax, in_axes=(0, 0))
@@ -51,7 +36,6 @@ def create_subject_params(
     )
 
     return group_mean, group_sd, offset
-
 
 @jax.jit
 def rescorla_wagner_update_wrapper(
