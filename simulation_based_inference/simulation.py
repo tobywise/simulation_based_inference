@@ -3,7 +3,6 @@ from functools import partial
 from typing import Tuple, List, Union, Dict
 import jax
 import jax.numpy as jnp
-from scipy.stats import multinomial
 
 
 @jax.jit
