@@ -14,7 +14,8 @@ from functools import partial
 from numpyro.infer import MCMC, NUTS
 
 # vmap softmax over observations
-softmax_vmap = jax.vmap(softmax, in_axes=(0, 0))
+softmax_vmap_blocks = jax.vmap(softmax, in_axes=(0, None))
+softmax_vmap_observations = jax.vmap(softmax_vmap_blocks, in_axes=(0, 0))
 
 
 def create_subject_params(
@@ -186,7 +187,7 @@ def rescorla_wagner_model(
 
     # Get action probabilities
     # p = numpyro.deterministic("p", softmax_vmap(v, temperature_subject_transformed))
-    p = softmax_vmap(v, temperature_subject_transformed)
+    p = softmax_vmap_observations(v, temperature_subject_transformed)
 
     # Bernoulli likelihood
     numpyro.sample(

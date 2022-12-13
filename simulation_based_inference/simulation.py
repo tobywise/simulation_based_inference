@@ -1,8 +1,9 @@
 import numpy as np
 from functools import partial
-from typing import Tuple, List, Union
+from typing import Tuple, List, Union, Dict
 import jax
 import jax.numpy as jnp
+from scipy.stats import multinomial
 
 
 @jax.jit
@@ -25,8 +26,11 @@ def softmax(value: np.ndarray, temperature: float = 1) -> np.ndarray:
     )
 
 
+# TODO update docstring
 @jax.jit
-def choice_from_action_p_jax(key: int, probs: jnp.ndarray, n_actions: int) -> int:
+def choice_from_action_p_jax(
+    key: int, probs: jnp.ndarray, n_actions: int, lapse: float = 0.0
+) -> int:
     """
     Choose an action from a set of action probabilities.
 
@@ -44,7 +48,13 @@ def choice_from_action_p_jax(key: int, probs: jnp.ndarray, n_actions: int) -> in
     # Deal with zero values etc
     probs = probs + 1e-6 / jnp.sum(probs)
 
-    return jax.random.choice(key, jnp.arange(n_actions, dtype=int), p=probs)
+    noise = jax.random.uniform(key) < lapse
+
+    choice = (1 - noise) * jax.random.choice(
+        key, jnp.arange(n_actions, dtype=int), p=probs
+    ) + noise * jax.random.randint(key, shape=(), minval=0, maxval=n_actions)
+
+    return choice
 
 
 def rescorla_wagner_update_choice_wrapper(
@@ -54,6 +64,7 @@ def rescorla_wagner_update_choice_wrapper(
     alpha_n: float,
     temperature: float,
     n_actions: int,
+    lapse: float = 0.0,
 ) -> np.ndarray:
     """
     Wrapper function for rescorla_wagner_update to use in jax.lax.scan, which produces choices for each trial
@@ -66,6 +77,7 @@ def rescorla_wagner_update_choice_wrapper(
         alpha_n (float): Negative learning rate
         temperature (float): Softmax temperature
         n_actions (int): Number of actions
+        lapse (float, optional): Lapse rate. Defaults to 0.0.
 
     Returns:
         np.ndarray: Updated value estimate
@@ -77,7 +89,7 @@ def rescorla_wagner_update_choice_wrapper(
 
     # Make a choice
     choice_p = softmax(value_estimate[None, :], temperature).squeeze()
-    choice = choice_from_action_p_jax(key, choice_p, n_actions)
+    choice = choice_from_action_p_jax(key, choice_p, n_actions, lapse)
 
     # Convert it to the right format
     choice_array = jnp.zeros(n_actions, dtype=jnp.int16)
@@ -105,6 +117,7 @@ def rescorla_wagner_trial_choice_iterator(
     alpha_p: float = 0.5,
     alpha_n: float = 0.5,
     temperature: float = 0.5,
+    lapse: float = 0.0,
 ) -> np.ndarray:
     """
     Iterate over trials and update value estimates, generating choices for each trial. Used for model-fitting.
@@ -118,6 +131,7 @@ def rescorla_wagner_trial_choice_iterator(
         alpha_p (float, optional): Learning rate for prediction errors > 0. Defaults to 0.5.
         alpha_n (float, optional): Learning rate for prediction errors < 0. Defaults to 0.5.
         temperature (float, optional): Temperature parameter for softmax. Defaults to 0.5.
+        lapse (float, optional): Lapse rate. Defaults to 0.0.
 
     Returns:
         np.ndarray: Value estimates for each trial and each bandit
@@ -130,6 +144,7 @@ def rescorla_wagner_trial_choice_iterator(
         alpha_n=alpha_n,
         temperature=temperature,
         n_actions=n_actions,
+        lapse=lapse,
     )
 
     # Initial values
@@ -154,13 +169,13 @@ rescorla_wagner_trial_choice_iterator_jit = jax.jit(
 # Vmap to iterate over blocks
 rescorla_wagner_simulate_vmap_blocks = jax.vmap(
     rescorla_wagner_trial_choice_iterator_jit,
-    in_axes=(None, 0, None, None, None, None, None, None),
+    in_axes=(None, 0, None, None, None, None, None, None, None),
 )
 
 # Vmap to iterate over observations (subjects)
 rescorla_wagner_simulate_vmap_observations = jax.vmap(
     rescorla_wagner_simulate_vmap_blocks,
-    in_axes=(None, None, None, None, None, 0, 0, 0),
+    in_axes=(None, None, None, None, None, 0, 0, 0, 0),
 )
 
 
@@ -239,6 +254,7 @@ def generate_bandit_outcomes(
 
     return outcomes, trial_outcome_probability_levels
 
+
 def generate_block_bandit_outcomes(
     n_trials_per_block: int,
     n_blocks: int,
@@ -292,7 +308,6 @@ def generate_block_bandit_outcomes(
     return outcomes, trial_probability_levels
 
 
-
 @jax.jit
 def rescorla_wagner_update(
     value_estimate: np.ndarray,
@@ -329,6 +344,7 @@ def rescorla_wagner_update(
 
     return value_estimate
 
+
 def simulate_rescorla_wagner_dual(
     alpha_p: np.ndarray,
     alpha_n: np.ndarray,
@@ -336,6 +352,7 @@ def simulate_rescorla_wagner_dual(
     outcomes: np.ndarray,
     choice_format: str = "one_hot",
     starting_value_estimate: float = 0.5,
+    noise: float = 0.0,
     seed: int = 42,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -348,6 +365,7 @@ def simulate_rescorla_wagner_dual(
         outcomes (np.ndarray): Outcomes for each block, trial and each bandit. An array of shape (n_blocks, n_trials, n_bandits).
         choice_format (str, optional): Format of the choices. Can be either 'one_hot' or 'index'. Defaults to "one_hot".
         starting_value_estimate (float, optional): Starting value estimate for each bandit. Defaults to 0.5.
+        noise (float, optional): Noise to add to the value estimates. Defaults to 0.0.
         seed (int, optional): Random seed. Defaults to 42.
 
     Returns:
@@ -361,9 +379,18 @@ def simulate_rescorla_wagner_dual(
     # Extract dimensions
     n_blocks, n_trials, n_bandits = outcomes.shape
 
+    # Set noise parameters
+    rng = np.random.RandomState(seed)
+    noise = rng.uniform(0, noise, len(alpha_p))
+
     # Run simulation
     key = jax.random.PRNGKey(seed)
-    value_estimates, choice_p, choices, choices_one_hot = rescorla_wagner_simulate_vmap_observations(
+    (
+        value_estimates,
+        choice_p,
+        choices,
+        choices_one_hot,
+    ) = rescorla_wagner_simulate_vmap_observations(
         key,
         outcomes,
         n_bandits,
@@ -372,6 +399,7 @@ def simulate_rescorla_wagner_dual(
         alpha_p,
         alpha_n,
         temperature,
+        noise,
     )
 
     if choice_format == "one_hot":
@@ -386,6 +414,7 @@ def simulate_rescorla_wagner_single(
     outcomes: Union[None, np.ndarray] = None,
     choice_format: str = "one_hot",
     starting_value_estimate: float = 0.5,
+    noise: float = 0.0,
     seed: int = 42,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -397,6 +426,7 @@ def simulate_rescorla_wagner_single(
         outcomes (Union[None, np.ndarray], optional): Outcomes for each trial and each bandit. If None, will be generated. Defaults to None.
         choice_format (str, optional): Format of the choices. Can be either 'one_hot' or 'index'. Defaults to "one_hot".
         starting_value_estimate (float, optional): Starting value estimate for each bandit. Defaults to 0.5.
+        noise (float, optional): Noise to add to the value estimates. Defaults to 0.0.
         seed (int, optional): Random seed. Defaults to 42.
 
     Returns:
@@ -410,5 +440,40 @@ def simulate_rescorla_wagner_single(
         outcomes,
         choice_format,
         starting_value_estimate,
-        seed
+        noise,
+        seed,
     )
+
+
+def simulate_multiple_rescorla_wagner_models(
+    outcomes: np.ndarray,
+    models: List[Tuple[str, callable, List[np.ndarray]]]
+) -> Dict[str, Dict[str, np.ndarray]]:
+    """
+    Simulate behaviour from multiple Rescorla-Wagner style models.
+
+    Args:
+        outcomes (np.ndarray): Outcomes for each block, trial and each bandit. An array of shape (n_blocks, n_trials, n_bandits).
+        models (List[Tuple[str, callable, List[np.ndarray]]]): List of models to simulate. Each model is a tuple with the name of 
+        the model, the function to simulate the model and a list of paramater values (as numpy arrays) to pass to the function.
+
+    Returns:
+        Dict[Dict]: Dictionary of dictionaries with the results of the simulations.
+    """
+
+    model_output = {}
+
+    # Loop over models
+    for (model_name, model_func, params) in models:
+
+        # Simulate using provided model function
+        choice_prob, choices, value_estimate = model_func(*params, outcomes=outcomes)
+
+        # Store results
+        model_output[model_name] = {}
+        model_output[model_name]['choices'] = choices
+        model_output[model_name]['choice_prob'] = choice_prob
+        model_output[model_name]['value_estimate'] = value_estimate
+        model_output[model_name]['params'] = np.stack(params).T
+
+    return model_output
