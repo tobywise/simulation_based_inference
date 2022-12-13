@@ -97,7 +97,7 @@ nflows==0.14
 notebook==6.5.2
 notebook_shim==0.2.2
 numba==0.56.4
-numpy==1.23.3
+numpy==1.23.0
 numpyro==0.10.1
 nvidia-cublas-cu11==11.10.3.66
 nvidia-cuda-nvrtc-cu11==11.7.99
