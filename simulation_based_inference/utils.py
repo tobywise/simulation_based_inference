@@ -3,7 +3,86 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import pandas as pd
+import torch
+from torch import tensor
 
+def process_X(X: np.ndarray, format: str = "one_hot") -> tensor:
+    """
+    Process X (choice data) to be in the right format for NPE. 
+
+    X data is expected to have either 3 or 4 dimensions. The first two dimensions represent
+    the number of observations and the number of blocks, respectively. If the data has 
+    3 dimensions, the data is assumed to be in numerical format (i.e., the last dimension 
+    represents the index of the chosen option). If 4 dimensions, the data is assumed to be 
+    in one-hot format (i.e., the last dimension represents the one-hot encoding 
+    of the chosen option).
+    
+    The `format` argument allows for recoding of the data in the desired format. 
+
+    Args:
+        X (np.ndarray): Array of shape (num_observations, n_blocks, ...)
+        format (str): Desired format of X. One of 'one_hot' or 'numerical'.
+
+    Returns:
+        X (torch.tensor): Tensor of shape (num_observations, num_features)
+
+    """
+
+    assert X.ndim in [
+        3,
+        4,
+    ], "X must have either 3 or 4 dimensions, but has {} dimensions".format(X.ndim)
+
+    if format == "one_hot" and X.ndim == 3:
+        X = one_hot_encode_choices(X)
+    elif format == "numerical" and X.ndim == 4:
+        X = numerical_encode_choices(X)
+
+    X = np.array(X.squeeze().reshape((X.shape[0], -1))).astype(np.float32)
+    X = torch.from_numpy(X)
+    return X
+
+
+def process_Y(y: np.ndarray) -> tensor:
+    """
+    Process y (parameter data) to be in the right format for NPE
+
+    Args:
+        y (np.ndarray): Array of shape (num_observations, n_params)
+
+    Returns:
+        y (torch.tensor): Tensor of shape (num_observations, n_params)
+
+    """
+    y = torch.from_numpy(y.astype(np.float32))
+    return y
+
+
+def process_Y_outcomes(y: np.ndarray, outcomes: np.ndarray) -> tensor:
+    """
+    Process y (parameter data) to be in the right format for NLE by concatenating outcomes
+
+    Args:
+        y (np.ndarray): Array of shape (num_observations, n_params)
+        outcomes (np.ndarray): Array of any shape.
+
+    Returns:
+        y_outcomes (torch.tensor): Tensor of shape (num_observations, n_params + n_outcomes), where
+        n_outcomes is the shape of the flattened outcome array
+
+    """
+
+    outcomes = np.array(outcomes.squeeze().reshape((outcomes.shape[0], -1))).astype(
+        np.float32
+    )
+
+    y_outcomes = torch.from_numpy(
+        np.hstack([y, outcomes.flatten()[None, :].repeat(y.shape[0], axis=0)]).astype(
+            np.float32
+        )
+    )
+
+    return y_outcomes
 
 def summary_df(samples:np.ndarray, param_names:List[str], hdpi_level:float=95) -> pd.DataFrame:
     """

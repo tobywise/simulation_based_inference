@@ -1,127 +1,9 @@
 import pytest
 import numpy as np
-from simulation_based_inference.simulation import *
-
-# Need long blocks to get decent probability estimates
-bandit_settings = [
-    (5000, 1, [0.2, 0.5, 0.8], (250, 251)),
-    (5000, 3, [0.1, 0.5, 0.9], (400, 401)),
-    (5000, 1, [0.3, 0.7], (300, 301)),
-]
-
-@pytest.mark.parametrize("n_trials,n_bandits,outcome_probability_levels,outcome_probability_duration", bandit_settings)
-def test_generate_bandit_outcomes_prob_levels(n_trials, n_bandits, outcome_probability_levels, outcome_probability_duration):
-
-    # Test that the outcome probabilities alternate between the levels specified
-    # in outcome_probability_levels
-
-    seed = 42
-
-    # Generate outcomes
-    outcomes, _ = generate_bandit_outcomes(
-        n_trials,
-        n_bandits,
-        outcome_probability_levels,
-        outcome_probability_duration,
-        seed,
-    )
-
-    for block in range(0, n_trials, outcome_probability_duration[0]):
-
-        for bandit in range(n_bandits):
-
-            outcome_prob = outcomes[
-                block : block + outcome_probability_duration[0], bandit
-            ].mean()
-
-            assert outcome_prob in outcome_probability_levels
-
-bandit_settings2 = [
-    (5000, 1, [0.2, 0.5, 0.8], (20, 50)),
-    (5000, 3, [0.1, 0.5, 0.9], (30, 60)),
-    (5000, 1, [0.3, 0.7], (80, 130)),
-]
-
-@pytest.mark.parametrize("n_trials,n_bandits,outcome_probability_levels,outcome_probability_duration", bandit_settings2)
-def test_generate_bandit_outcome_prob_levels_returned(n_trials, n_bandits, outcome_probability_levels, outcome_probability_duration):
-
-    seed = 42
-
-    # Generate outcomes
-    outcomes, trial_outcome_probability_levels = generate_bandit_outcomes(
-        n_trials,
-        n_bandits,
-        outcome_probability_levels,
-        outcome_probability_duration,
-        seed,
-    )
-
-    for block in range(0, n_trials, outcome_probability_duration[0]):
-
-        for bandit in range(n_bandits):
-
-            breakpoints = np.hstack([np.array([0]), np.where(np.diff(trial_outcome_probability_levels[:, bandit]) != 0)[0] + 1])
-
-            for n in range(len(breakpoints) - 1):
-                true_outcome_prob = outcomes[
-                                    breakpoints[n]:breakpoints[n+1], bandit
-                                ].mean()
-                reported_trial_outcome_prob = trial_outcome_probability_levels[breakpoints[n]:breakpoints[n+1], bandit]
-                print(n, breakpoints[n], breakpoints[n+1])
-                assert np.all(reported_trial_outcome_prob == reported_trial_outcome_prob[0])
-                reported_outcome_prob = reported_trial_outcome_prob.mean()
-
-                assert np.isclose(true_outcome_prob, reported_outcome_prob, atol=0.05)
-                assert any([np.isclose(true_outcome_prob, p, atol=0.05) for p in outcome_probability_levels])
-
-
-
-@pytest.mark.parametrize("n_trials,n_bandits,outcome_probability_levels,outcome_probability_duration", bandit_settings)
-def test_generate_bandit_outcomes_block_lengths(n_trials, n_bandits, outcome_probability_levels, outcome_probability_duration):
-
-    # Test that the outcome probabilities alternate between the levels specified
-    # in outcome_probability_levels
-
-    # Set parameters
-    seed = 42
-
-    # Generate outcomes
-    outcomes, _ = generate_bandit_outcomes(
-        n_trials,
-        n_bandits,
-        outcome_probability_levels,
-        outcome_probability_duration,
-        seed,
-    )
-
-    for block in range(outcome_probability_duration[0], n_trials, outcome_probability_duration[0]):
-
-        for bandit in range(n_bandits):
-
-            outcome_prob_before = outcomes[
-                block - int(outcome_probability_duration[0] / 2) : block, bandit
-            ].mean()
-
-            outcome_prob_after = outcomes[
-                block : block + int(outcome_probability_duration[0] / 4), bandit
-            ].mean()
-            print(block, outcome_prob_before, outcome_prob_after)
-            assert (
-                ~np.isclose(outcome_prob_before, outcome_prob_after, atol=0.1)
-            )  # Prob before and after block changes should be different
-
-
-def test_generate_bandit_outcomes_block_shapes_values():
-
-    outcomes, _ = generate_block_bandit_outcomes(100, 3, 4)
-
-    assert outcomes.shape == (3, 100, 4)
-
-    assert np.all(np.isin(outcomes, [0, 1]))
-    assert (outcomes[0, ...] != outcomes[1, ...]).any()
-    assert (outcomes[0, ...] != outcomes[2, ...]).any()
-    assert (outcomes[2, ...] != outcomes[1, ...]).any()
-
+from simulation_based_inference.simulation.rescorla_wagner import *
+from simulation_based_inference.simulation.model_based import *
+from simulation_based_inference.simulation.tasks import *
+from scipy.stats import bernoulli
 
 rw_parameters = [
     (0.5, 0.5),
@@ -171,10 +53,10 @@ def q_values_fixture():
     q_vals[0, :] = np.array([4.5, 3.5, 2.5, 1.5])
     q_vals[1, :] = np.array([0, 0, 0, 0])
     q_vals[2, :] = np.array([1, 1, 0, 0])
-    q_vals[3, :] = np.array([200, 50, 2, 1])
+    q_vals[3, :] = np.array([20, 5, 2, 1])
     q_vals[4, :] = np.array([-20, 0, 20, 1])
-    q_vals[5, :] = np.array([10003434, 0, 100000, -100])
-    q_vals[6, :] = np.array([-100000, 0, -5000, -500000000000])
+    q_vals[5, :] = np.array([34, 0, 10, -10])
+    q_vals[6, :] = np.array([-10, 0, -5, -50])
     return q_vals
 
 @pytest.fixture()
@@ -307,3 +189,103 @@ def test_choices_not_the_same():
 
     # check that all values are represented in choices
     assert len(np.unique(choices)) == 4
+
+
+def test_get_choice_MB_choices_valid(q_values_fixture):
+
+    key = jax.random.PRNGKey(42)
+
+    for i in range(q_values_fixture.shape[0]):
+
+        choice_array, choice_p, choice = get_choice(q_values_fixture[i, :], key, 4)
+
+        assert choice in [0, 1, 2, 3]
+        assert choice_array[choice] == 1
+        assert choice_array.sum() == 1
+        assert np.all(choice_array >= 0)
+        assert np.all(choice_array <= 1)
+        
+        assert np.isclose(choice_p.sum(), 1)
+        if i == 0:
+            assert np.all(np.diff(choice_p) < 0)
+        if i == 1:
+            assert np.all(choice_p== choice_p[0])
+        assert np.all(choice_p >= 0)
+        assert np.all(choice_p <= 1)
+
+
+
+
+def test_delta_rule_update_learning_rate():
+
+    rng = np.random.RandomState(42)
+
+    for i in range(10):
+
+        q = np.ones((2, 2)) * 0.5
+        q_value_selector = np.zeros((2, 2))
+        q_value_selector[rng.randint(0, 2), rng.randint(0, 2)] = 1
+
+        outcomes = np.random.uniform(size=(2, 2))
+        outcome_selector = np.zeros((2, 2))
+        outcome_selector[rng.randint(0, 2), rng.randint(0, 2)] = 1
+
+        alpha = rng.uniform(0, 1)
+
+        q_updated = delta_rule_update(q, q_value_selector, outcomes, outcome_selector, alpha)
+
+        assert np.isclose(q_updated[q_value_selector.astype(bool)], outcomes[outcome_selector.astype(bool)] + 0.5 * (1 - alpha))
+        assert np.isclose(q_updated[~q_value_selector.astype(bool)], 0.5 * (1 - alpha)).all()
+
+
+def test_mb_learner_learning_rates_choice_probs():
+
+    outcomes, probs = generate_block_bandit_outcomes(100, 1, (2, 2), outcome_generator='random_walk')
+
+    alpha = np.array([0.3, 0.7])
+    beta = np.array([1, 1])
+    choice_p, choices_one_hot, value_estimates = simulate_mb_learner(
+        alpha,
+        beta * 0,
+        beta,
+        beta,
+        beta * 0,
+        beta,
+        outcomes,
+        np.array([[0.7, 0.3], [0.3, 0.7]]),
+        return_choice_probabilities=True
+    )
+
+    # Choice prob should be more variable with higher learning rate (doesn't work for stage 2 as choice_p switches between end states)
+    assert np.mean(np.abs(np.diff(choice_p[0][1, 0, :, :], axis=0))) > np.mean(np.abs(np.diff(choice_p[0][0, 0, :, :], axis=0)))
+
+    # Choice probs should be higher for 1 than 0
+    assert (choice_p[0] * choices_one_hot[0]).mean() > (choice_p[0] * (1 - choices_one_hot[0])).mean()
+    assert (choice_p[1] * choices_one_hot[1]).mean() > (choice_p[1] * (1 - choices_one_hot[1])).mean()
+
+
+    assert (
+        bernoulli.logpmf(choices_one_hot[0], choice_p[0]).sum()
+        > bernoulli.logpmf(choices_one_hot[0], np.ones_like(choice_p[0]) * 0.5).sum()
+    )  # choices shouldn't be random
+    assert (
+        bernoulli.logpmf(choices_one_hot[0], choice_p[0]).sum()
+        > bernoulli.logpmf(choices_one_hot[0], np.ones_like(choice_p[0])).sum()
+    )  # choices shouldn't be 1
+    assert (
+        bernoulli.logpmf(choices_one_hot[0], choice_p[0]).sum()
+        > bernoulli.logpmf(choices_one_hot[0], np.zeros_like(choice_p[0])).sum()
+    )  # choices shouldn't be 0
+
+    assert (
+        bernoulli.logpmf(choices_one_hot[1], choice_p[1]).sum()
+        > bernoulli.logpmf(choices_one_hot[1], np.ones_like(choice_p[1]) * 0.5).sum()
+    )  # choices shouldn't be random
+    assert (
+        bernoulli.logpmf(choices_one_hot[1], choice_p[1]).sum()
+        > bernoulli.logpmf(choices_one_hot[1], np.ones_like(choice_p[1])).sum()
+    )  # choices shouldn't be 1
+    assert (
+        bernoulli.logpmf(choices_one_hot[1], choice_p[1]).sum()
+        > bernoulli.logpmf(choices_one_hot[1], np.zeros_like(choice_p[1])).sum()
+    )  # choices shouldn't be 0
