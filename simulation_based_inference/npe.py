@@ -170,7 +170,7 @@ class NPEModel:
 
         return self.X, self.y
 
-    def fit(self, X: np.ndarray, y: np.ndarray):
+    def fit(self, X: np.ndarray, y: np.ndarray, seed: int = 0) -> None:
         """
         Fits the NPE estimator to the data.
 
@@ -180,6 +180,7 @@ class NPEModel:
         represents the index of the chosen option). If 4 dimensions, the data is assumed to be 
         in one-hot format (i.e., the last dimension represents the one-hot encoding 
         of the chosen option).
+        seed (int, optional): Random seed. Defaults to 0.
         
         The `format` argument allows for recoding of the data in the desired format. 
 
@@ -190,6 +191,8 @@ class NPEModel:
             y (np.ndarray): True parameter values, as a 2D array with shape (n_subjects, n_params)
 
         """
+
+        torch.manual_seed(seed);
 
         self.n_params = y.shape[1]
 
@@ -208,7 +211,7 @@ class NPEModel:
         ).train()
 
     def sample(
-        self, X: np.ndarray, n_samples: int = 1000, progress_bar: bool = True
+        self, X: np.ndarray, n_samples: int = 1000, progress_bar: bool = True, seed: int = 0
     ) -> np.ndarray:
         """
         Sample from the estimated posterior.
@@ -219,10 +222,13 @@ class NPEModel:
             represent choices, and can be either 3D (numerical format) or 4D (one-hot format).
             n_samples (int, optional): Number of samples to draw. Defaults to 1000.
             progress_bar (bool): Whether to show a progress bar
+            seed (int, optional): Random seed. Defaults to 0.
 
         Returns:
             np.ndarray: Samples from the posterior. Array of shape (num_observations, n_samples, n_params)
         """
+
+        torch.manual_seed(seed);
 
         X = process_X(X, format=self.choice_format)
 
