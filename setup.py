@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
 setup(
-    name='src',
+    name='simulation_based_inference',
     packages=find_packages(),
 )
