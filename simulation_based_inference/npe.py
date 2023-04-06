@@ -19,7 +19,7 @@ from sbi.utils.sbiutils import (
     z_score_parser,
 )
 from sbi.utils.user_input_checks import check_data_device, check_embedding_net_device
-from utils import process_X, process_Y
+from .utils import process_X, process_Y
 
 
 def build_logit_maf(

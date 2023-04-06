@@ -6,7 +6,7 @@ from torch.distributions import Categorical
 import numpy as np
 from sbi.utils.sbiutils import standardizing_net
 from sbi.utils.user_input_checks import check_data_device
-from utils import process_X, process_Y_outcomes
+from .utils import process_X, process_Y_outcomes
 from sbi import utils as utils
 from sbi.inference import SNLE
 from tqdm import tqdm
