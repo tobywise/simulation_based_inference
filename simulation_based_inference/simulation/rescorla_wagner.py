@@ -152,7 +152,7 @@ rescorla_wagner_simulate_vmap_blocks = jax.vmap(
 # Vmap to iterate over observations (subjects)
 rescorla_wagner_simulate_vmap_observations = jax.vmap(
     rescorla_wagner_simulate_vmap_blocks,
-    in_axes=(None, 0, None, None, None, 0, 0, 0, 0, None, None),
+    in_axes=(None, 0, None, None, None, 0, 0, 0, None, None, None),
 )
 
 
