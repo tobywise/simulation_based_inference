@@ -6,7 +6,7 @@ setup(
     install_requires=[
         'numpy',
         'pandas',
-        'sbi',
+        'sbi==0.22.0',
         'tqdm'
     ]
 )
